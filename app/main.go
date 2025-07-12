@@ -14,13 +14,13 @@ import (
 func main() {
     err := godotenv.Load()
     if err != nil {
-        log.Fatal("Error loading .env file")
+    log.Println("Warning: No .env file found (OK on Render)")
     }
     botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
     webhookURL := os.Getenv("WEBHOOK_URL") // e.g., https://yourdomain.com/<token>
 
     if botToken == "" || webhookURL == "" {
-        log.Fatal("TELEGRAM_BOT_TOKEN or WEBHOOK_URL not set")
+    log.Println("Warning: No .env file found (OK on Render)")
     }
 
     bot, err := tgbotapi.NewBotAPI(botToken)
@@ -52,5 +52,10 @@ func main() {
     })
 
     log.Println("Bot is listening on :8000")
-    router.Run(":8000")
+    port := os.Getenv("PORT")
+	if port == "" {
+		port = "8000" // fallback for local dev
+	}
+    
+    router.Run(":" + port)
 }
