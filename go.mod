@@ -4,12 +4,15 @@ go 1.22.3
 
 require (
 	github.com/gin-gonic/gin v1.10.1
-	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.2-0.20221020003552-4126fa611266
+	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.28
 )
 
+require github.com/stretchr/testify v1.9.0 // indirect
+
 require (
+	github.com/aws/aws-lambda-go v1.49.0
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
 	github.com/cloudwego/base64x v0.1.4 // indirect
