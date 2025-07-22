@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,7 +31,6 @@ func NewBotHandler(bot *tgbotapi.BotAPI) *BotHandler {
 
 func (h *BotHandler) HandleUpdate(update tgbotapi.Update) {
 	// Handle pre-checkout queries
-	log.Printf("Received update: %+v", update)
 	if update.PreCheckoutQuery != nil {
 		h.handlePreCheckoutQuery(update.PreCheckoutQuery)
 		return
@@ -76,6 +76,10 @@ func (h *BotHandler) HandleUpdate(update tgbotapi.Update) {
 	}
 
 	// Handle payment amount input
+	if h.isWaitingForPaymentAmount(chatID) {
+		h.handlePaymentAmountInput(chatID, userID, text)
+		return
+	}
 
 	// Check if user is registered for other commands
 	user, err := models.GetUserByTelegramID(userID)
@@ -94,7 +98,20 @@ func (h *BotHandler) HandleUpdate(update tgbotapi.Update) {
 	h.handleRegisteredUserMessage(chatID, text)
 }
 
+// paymentWaitingUsers stores chat IDs waiting for payment amount input
+var paymentWaitingUsers = make(map[int64]bool)
 
+func (h *BotHandler) isWaitingForPaymentAmount(chatID int64) bool {
+	return paymentWaitingUsers[chatID]
+}
+
+func (h *BotHandler) setWaitingForPaymentAmount(chatID int64, waiting bool) {
+	if waiting {
+		paymentWaitingUsers[chatID] = true
+	} else {
+		delete(paymentWaitingUsers, chatID)
+	}
+}
 
 func (h *BotHandler) handlePaymentCommand(chatID, userID int64, text string) {
 	// Check if user is registered
@@ -111,62 +128,64 @@ func (h *BotHandler) handlePaymentCommand(chatID, userID int64, text string) {
 	// }
 
 	// Parse payment command
-	// parts := strings.Fields(text)
-	// if len(parts) == 1 {
-	// 	// Show payment menu
-	// 	h.showPaymentMenu(chatID)
-	// 	return
-	// }
+	parts := strings.Fields(text)
+	if len(parts) == 1 {
+		// Show payment menu
+		h.showPaymentMenu(chatID)
+		return
+	}
 
 	// Handle specific payment subcommands
-	// switch parts[1] {
-	// case "start":
-	// err := h.sendInvoice(chatID, userID, 1000, "Telegram Bot Payment")
-	// if err != nil {
-	// 	log.Printf("Error sending invoice: %v", err)
-	// 	h.sendMessage(chatID, "❌ Failed to create payment. Please try again later.")
-	// 	return
-	// }
-	h.showPaymentMenu(chatID)
+	switch parts[1] {
+	case "start":
+		err := h.sendInvoice(chatID, userID, 1000, "USD", "Telegram Bot Payment")
+	if err != nil {
+		log.Printf("Error sending invoice: %v", err)
+		h.sendMessage(chatID, "❌ Failed to create payment. Please try again later.")
+		return
+	}
 
-// 	case "help":
-// 		h.sendMessage(chatID, `💳 <b>Payment Help</b>
+	case "help":
+		h.sendMessage(chatID, `💳 <b>Payment Help</b>
 
-// Available payment commands:
-// • /payment start - Start a new payment
-// • /payment help - Show this help message
+Available payment commands:
+• /payment start - Start a new payment
+• /payment help - Show this help message
 
-// Supported currencies: USD, EUR, NGN, GHS, KES, UGX, TZS, ZAR
+Supported currencies: USD, EUR, NGN, GHS, KES, UGX, TZS, ZAR
 
-// The payment will be processed securely through Telegram Payments.`)
-// 	default:
-// 		h.sendMessage(chatID, "Unknown payment command. Use /payment help for available options.")
-	// }
+The payment will be processed securely through Telegram Payments.`)
+	default:
+		h.sendMessage(chatID, "Unknown payment command. Use /payment help for available options.")
+	}
 }
 
-// func (h *BotHandler) handlePaymentAmountInput(chatID, userID int64, text string) {
-// 	// Parse amount
-// 	amount, err := strconv.ParseFloat(text, 64)
-// 	if err != nil {
-// 		h.sendMessage(chatID, "❌ Invalid amount. Please enter a valid number (e.g., 1000):")
-// 		return
-// 	}
+func (h *BotHandler) handlePaymentAmountInput(chatID, userID int64, text string) {
+	// Parse amount
+	amount, err := strconv.ParseFloat(text, 64)
+	if err != nil {
+		h.sendMessage(chatID, "❌ Invalid amount. Please enter a valid number (e.g., 1000):")
+		return
+	}
 
-// 	if amount <= 0 {
-// 		h.sendMessage(chatID, "❌ Amount must be greater than 0. Please try again:")
-// 		return
-// 	}
+	if amount <= 0 {
+		h.sendMessage(chatID, "❌ Amount must be greater than 0. Please try again:")
+		return
+	}
 
-// 	// Create and send invoice
-// 	err = h.sendInvoice(chatID, userID, amount, "Telegram Bot Payment")
-// 	if err != nil {
-// 		log.Printf("Error sending invoice: %v", err)
-// 		h.sendMessage(chatID, "❌ Failed to create payment. Please try again later.")
-// 		return
-// 	}
-// }
+	// Create and send invoice
+	err = h.sendInvoice(chatID, userID, amount, "USD", "Telegram Bot Payment")
+	if err != nil {
+		log.Printf("Error sending invoice: %v", err)
+		h.sendMessage(chatID, "❌ Failed to create payment. Please try again later.")
+		h.setWaitingForPaymentAmount(chatID, false)
+		return
+	}
 
-func (h *BotHandler) sendInvoice(chatID, userID int64, amount float64, description string) error {
+	h.setWaitingForPaymentAmount(chatID, false)
+}
+
+func (h *BotHandler) sendInvoice(chatID, userID int64, amount float64, currency, description string) error {
 	// Convert amount to cents (Telegram expects amounts in cents)
 	amountCents := int(amount * 100)
 
@@ -179,7 +198,7 @@ func (h *BotHandler) sendInvoice(chatID, userID int64, amount float64, descripti
 	// Create invoice config
 	invoice := tgbotapi.NewInvoice(chatID, description, description, 
 		fmt.Sprintf("payment_%d_%d", userID, time.Now().Unix()), 
-		h.providerToken, "USD", "ETB", []tgbotapi.LabeledPrice{item})
+		h.providerToken, currency, "payment", []tgbotapi.LabeledPrice{item})
 
 	// Set optional parameters
 	invoice.StartParameter = "payment"
@@ -188,9 +207,6 @@ func (h *BotHandler) sendInvoice(chatID, userID int64, amount float64, descripti
 	invoice.NeedPhoneNumber = true
 	invoice.NeedShippingAddress = false
 	invoice.IsFlexible = false
-	invoice.SuggestedTipAmounts = []int{100, 200, 500} // Optional tip amounts in cents
-	invoice.Payload = fmt.Sprintf("user_%d", userID) // Custom payload to identify the user
-	invoice.MaxTipAmount = 600
 
 	// Send the invoice
 	_, err := h.bot.Send(invoice)
@@ -231,7 +247,6 @@ func (h *BotHandler) handleSuccessfulPayment(message *tgbotapi.Message) {
 		Currency:    payment.Currency,
 		Description: payment.InvoicePayload,
 		Status:      "completed",
-		TelegramPaymentChargeID: payment.TelegramPaymentChargeID,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -282,7 +297,9 @@ func (h *BotHandler) handleCallbackQuery(callback *tgbotapi.CallbackQuery) {
 
 	switch data {
 	case "payment_start":
-		h.sendMessage(chatID, "Please enter the amount you want to pay (in USD):")
+		h.setWaitingForPaymentAmount(chatID, true)
+		h.sendMessage(chatID, "💳 <b>Payment Setup</b>\n\nPlease enter the amount you want to pay (e.g., 1000):")
+	
 	case "payment_help":
 		h.sendMessage(chatID, `💳 <b>Payment Help</b>
 
@@ -296,6 +313,7 @@ The payment will be processed securely through Telegram Payments.`)
 
 	case "payment_cancel":
 		h.sendMessage(chatID, "❌ Payment cancelled.")
+		h.setWaitingForPaymentAmount(chatID, false)
 
 	default:
 		h.sendMessage(chatID, "Unknown button action")
@@ -323,7 +341,7 @@ Please click the Register button below to complete your registration.`
 		// Create inline keyboard with Register button that opens registration page
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonURL("Open Mini App", "https://7wwb0knl-5173.euw.devtunnels.ms/"),
+				tgbotapi.NewInlineKeyboardButtonWebApp("Open Mini App", tgbotapi.WebAppInfo{URL: "https://7wwb0knl-5173.euw.devtunnels.ms/"}),
 			),
 		)
 
